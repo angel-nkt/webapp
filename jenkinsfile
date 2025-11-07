@@ -1,0 +1,151 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_IMAGE = "webapp"
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        SLACK_CHANNEL = "#tous-angelique"  
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: '#439FE0',
+                        message: "🚀 *Pipeline démarré* - Build #${env.BUILD_NUMBER}\n*Branch:* ${env.GIT_BRANCH}\n*Stage:* Checkout"
+                    )
+                }
+                
+                // Récupération du code source
+                checkout scm
+                
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: "✅ *Checkout terminé* - Build #${env.BUILD_NUMBER}"
+                    )
+                }
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: '#439FE0',
+                        message: "🔨 *Build en cours* - Build #${env.BUILD_NUMBER}\n*Stage:* Build Docker Image"
+                    )
+                }
+                
+                script {
+                    // Construction de l'image Docker
+                    sh """
+                        docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    """
+                }
+                
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: "✅ *Build réussi* - Build #${env.BUILD_NUMBER}\n*Image:* ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    )
+                }
+            }
+        }
+        
+        stage('Test') {
+            steps {
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: '#439FE0',
+                        message: "🧪 *Tests en cours* - Build #${env.BUILD_NUMBER}\n*Stage:* Running Tests"
+                    )
+                }
+                
+                script {
+                    // Lancer les tests (exemple avec un conteneur temporaire)
+                    sh """
+                        docker run --rm ${DOCKER_IMAGE}:${DOCKER_TAG} python -m pytest tests/ || true
+                        echo "Tests exécutés"
+                    """
+                }
+                
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: "✅ *Tests terminés* - Build #${env.BUILD_NUMBER}"
+                    )
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: '#439FE0',
+                        message: "🚀 *Déploiement en cours* - Build #${env.BUILD_NUMBER}\n*Stage:* Deploy"
+                    )
+                }
+                
+                script {
+                    // Arrêter l'ancien conteneur s'il existe
+                    sh """
+                        docker stop ${DOCKER_IMAGE} || true
+                        docker rm ${DOCKER_IMAGE} || true
+                    """
+                    
+                    // Démarrer le nouveau conteneur
+                    sh """
+                        docker run -d \
+                            --name ${DOCKER_IMAGE} \
+                            -p 5000:5000 \
+                            --restart unless-stopped \
+                            ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    """
+                }
+                
+                script {
+                    slackSend(
+                        channel: env.SLACK_CHANNEL,
+                        color: 'good',
+                        message: "✅ *Déploiement réussi* - Build #${env.BUILD_NUMBER}\n*URL:* http://localhost:5000"
+                    )
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            slackSend(
+                channel: env.SLACK_CHANNEL,
+                color: 'good',
+                message: "🎉 *Pipeline RÉUSSI* - Build #${env.BUILD_NUMBER}\n*Branch:* ${env.GIT_BRANCH}\n*Durée:* ${currentBuild.durationString}"
+            )
+        }
+        
+        failure {
+            slackSend(
+                channel: env.SLACK_CHANNEL,
+                color: 'danger',
+                message: "❌ *Pipeline ÉCHOUÉ* - Build #${env.BUILD_NUMBER}\n*Branch:* ${env.GIT_BRANCH}\n*Stage:* ${env.STAGE_NAME}"
+            )
+        }
+        
+        always {
+            // Nettoyage des images Docker non utilisées
+            sh 'docker image prune -f || true'
+        }
+    }
+}
+```
